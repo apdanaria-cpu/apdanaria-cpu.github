@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101318">
+<meta name="description" content="RaceBox — speedometer GPS dan timer akselerasi sederhana.">
+<link rel="manifest" href="manifest.json">
+<title>RaceBox</title>
+<style>
+:root{color-scheme:dark;--bg:#0b0d10;--panel:#15191f;--panel2:#1d232b;--text:#f3f5f7;--muted:#9ba6b2;--red:#ff3b46;--green:#54e39a;--line:#2a313b}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#202630 0,#0b0d10 55%);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;min-height:100vh}
+main{max-width:650px;margin:auto;padding:20px 16px 36px}
+header{display:flex;align-items:center;justify-content:space-between;margin:4px 0 20px}
+.brand{font-weight:900;letter-spacing:2px;font-size:23px}.brand span{color:var(--red)}.status{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:7px}.dot{width:8px;height:8px;border-radius:50%;background:#68727e}.dot.live{background:var(--green);box-shadow:0 0 10px #54e39a66}
+.speed-card{background:linear-gradient(145deg,#202630,#12161b);border:1px solid #303844;border-radius:24px;padding:24px 18px 20px;text-align:center;box-shadow:0 16px 45px #0005}
+.kicker{color:var(--muted);font-size:12px;letter-spacing:2px;font-weight:700}
+.speed{font-size:clamp(88px,25vw,140px);font-weight:900;letter-spacing:-7px;line-height:1.1;margin:12px 0 0;font-variant-numeric:tabular-nums}
+.unit{font-size:15px;letter-spacing:4px;color:var(--muted);font-weight:700}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:17px 15px}
+.stat .label{font-size:11px;color:var(--muted);letter-spacing:1px;font-weight:700}.stat .value{font-size:27px;font-weight:800;margin-top:6px;font-variant-numeric:tabular-nums}.stat small{font-size:12px;color:var(--muted);font-weight:500}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0}
+button{border:0;border-radius:14px;padding:15px 12px;font:inherit;font-weight:800;cursor:pointer}
+.primary{background:var(--red);color:white}.secondary{background:var(--panel2);color:var(--text);border:1px solid var(--line)}button:disabled{opacity:.45;cursor:not-allowed}
+.message{background:#171b21;border:1px solid var(--line);border-radius:12px;padding:12px 14px;color:var(--muted);font-size:13px;line-height:1.5;margin:12px 0}
+.section-head{display:flex;align-items:center;justify-content:space-between;margin:24px 2px 10px}.section-head h2{font-size:15px;letter-spacing:1px;margin:0}.clear{background:transparent;color:var(--muted);padding:5px;font-size:12px}
+.history{display:grid;gap:8px}.empty{color:var(--muted);font-size:13px;padding:18px;text-align:center;background:var(--panel);border-radius:14px;border:1px solid var(--line)}
+.run{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px;background:var(--panel);border:1px solid var(--line);border-radius:14px}.run strong{display:block;font-size:17px}.run small{color:var(--muted)}.run .time{text-align:right;font-size:20px;font-weight:850}
+footer{color:#75808c;font-size:11px;text-align:center;line-height:1.6;margin-top:24px}
+@media(min-width:520px){main{padding-top:28px}.speed-card{padding:28px}}
+</style>
+</head>
+<body>
+<main>
+<header><div class="brand">RACE<span>BOX</span></div><div class="status"><i class="dot" id="gpsDot"></i><span id="gpsStatus">GPS belum aktif</span></div></header>
+<section class="speed-card">
+<div class="kicker">GPS SPEEDOMETER</div>
+<div class="speed" id="speed">--</div><div class="unit">KM/H</div>
+<div class="message" id="message">Tekan “Aktifkan GPS”, lalu izinkan akses lokasi di browser. Gunakan di tempat aman dan jangan melihat layar saat berkendara.</div>
+</section>
+<section class="stats">
+<div class="stat"><div class="label">AKSELERASI</div><div class="value" id="accel">-- <small>detik</small></div><small>0–60 km/jam</small></div>
+<div class="stat"><div class="label">AKURASI GPS</div><div class="value" id="accuracy">-- <small>m</small></div><small>Semakin kecil biasanya lebih baik</small></div>
+</section>
+<div class="actions">
+<button class="primary" id="gpsButton">Aktifkan GPS</button>
+<button class="secondary" id="resetButton">Reset pengukuran</button>
+</div>
+<div class="actions">
+<button class="secondary" id="saveButton" disabled>Simpan sesi</button>
+<button class="secondary" id="stopButton" disabled>Matikan GPS</button>
+</div>
+<div class="section-head"><h2>RIWAYAT SESI</h2><button class="clear" id="clearHistory">Hapus riwayat</button></div>
+<div class="history" id="history"></div>
+<footer>RaceBox Web • Kecepatan berasal dari GPS ponsel, jadi pembacaan bisa terlambat atau kurang akurat.<br>Uji hanya di tempat aman dan legal. Jangan gunakan sambil memegang ponsel saat berkendara.</footer>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let watchId=null, currentSpeed=0, bestAccel=null, accelStart=null, accelDone=false, lastSpeed=0, lastTime=0, sessionStarted=false;
+const HISTORY_KEY='racebox-history-v1';
+function setStatus(text,live=false){$('gpsStatus').textContent=text;$('gpsDot').classList.toggle('live',live)}
+function speedFromPosition(pos){
+  const s=pos.coords.speed;
+  const kmh=(s!=null&&Number.isFinite(s))?Math.max(0,s*3.6):0;
+  currentSpeed=kmh;
+  $('speed').textContent=(s==null?'--':kmh.toFixed(1));
+  $('accuracy').innerHTML=Math.round(pos.coords.accuracy)+' <small>m</small>';
+  setStatus('GPS aktif',true);
+  $('message').textContent='GPS berjalan. Timer 0–60 dimulai saat kecepatan terdeteksi naik dari hampir berhenti, lalu berhenti pada 60 km/jam.';
+  const now=performance.now();
+  if(!sessionStarted && kmh<3){sessionStarted=true;accelStart=null;accelDone=false;}
+  if(sessionStarted&&!accelDone){
+    if(accelStart===null && kmh>=3) accelStart=now;
+    if(accelStart!==null && kmh>=60){bestAccel=(now-accelStart)/1000;accelDone=true;$('accel').innerHTML=bestAccel.toFixed(2)+' <small>detik</small>';$('saveButton').disabled=false;}
+  }
+  lastSpeed=kmh;lastTime=now;
+  $('saveButton').disabled=!(bestAccel!==null);
+  $('stopButton').disabled=false;
+}
+function startGPS(){
+ if(!('geolocation' in navigator)){ $('message').textContent='Browser ini tidak mendukung GPS lokasi.';return; }
+ if(!window.isSecureContext){$('message').textContent='Akses GPS membutuhkan situs HTTPS. Upload folder ini ke layanan hosting statis HTTPS lalu buka link situsnya.';return;}
+ $('gpsButton').disabled=true;setStatus('Mencari GPS…');
+ $('message').textContent='Meminta izin lokasi…';
+ watchId=navigator.geolocation.watchPosition(speedFromPosition,err=>{
+   setStatus('GPS bermasalah');
+   const msgs={1:'Izin lokasi ditolak. Aktifkan izin lokasi untuk situs ini di pengaturan browser.',2:'Sinyal lokasi tidak tersedia. Coba di area terbuka.',3:'GPS terlalu lama merespons. Coba lagi.'};
+   $('message').textContent=msgs[err.code]||'Tidak dapat membaca GPS.';
+   $('gpsButton').disabled=false;
+ },{enableHighAccuracy:true,maximumAge:500,timeout:15000});
+}
+function stopGPS(){if(watchId!==null)navigator.geolocation.clearWatch(watchId);watchId=null;$('gpsButton').disabled=false;$('stopButton').disabled=true;setStatus('GPS mati');}
+function reset(){currentSpeed=0;bestAccel=null;accelStart=null;accelDone=false;sessionStarted=false;$('speed').textContent='--';$('accel').innerHTML='-- <small>detik</small>';$('accuracy').innerHTML='-- <small>m</small>';$('saveButton').disabled=true;$('message').textContent='Pengukuran direset. Untuk hasil 0–60, mulai dari kondisi berhenti di area aman.';}
+function getHistory(){try{return JSON.parse(localStorage.getItem(HISTORY_KEY)||'[]')}catch(e){return []}}
+function renderHistory(){const h=getHistory();$('history').innerHTML='';if(!h.length){$('history').innerHTML='<div class="empty">Belum ada sesi tersimpan.</div>';return;}h.forEach((x,i)=>{const el=document.createElement('div');el.className='run';const left=document.createElement('div');const strong=document.createElement('strong');strong.textContent='Sesi '+(h.length-i);const small=document.createElement('small');small.textContent=x.date+' • kecepatan akhir '+x.speed+' km/jam';left.append(strong,small);const right=document.createElement('div');right.className='time';right.textContent=x.accel+' dtk';el.append(left,right);$('history').append(el);});}
+$('gpsButton').addEventListener('click',startGPS);$('stopButton').addEventListener('click',stopGPS);$('resetButton').addEventListener('click',reset);
+$('saveButton').addEventListener('click',()=>{if(bestAccel===null)return;const h=getHistory();h.unshift({date:new Date().toLocaleString('id-ID'),accel:bestAccel.toFixed(2),speed:currentSpeed.toFixed(1)});localStorage.setItem(HISTORY_KEY,JSON.stringify(h.slice(0,50)));renderHistory();$('saveButton').disabled=true;$('message').textContent='Sesi tersimpan di browser pada ponsel ini.';});
+$('clearHistory').addEventListener('click',()=>{if(confirm('Hapus semua riwayat RaceBox?')){localStorage.removeItem(HISTORY_KEY);renderHistory();}});
+renderHistory();
+if('serviceWorker' in navigator && location.protocol.startsWith('http')) window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+</script>
+</body></html>
